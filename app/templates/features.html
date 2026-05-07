@@ -117,7 +117,8 @@
                 {{ f.release_phase or '—' }}
               </span>
             </td>
-            <td><span class="editable-cell" data-field="ga_estimate" data-id="{{ f.id }}">{{ f.ga_estimate or '' }}</span></td>
+            <td><span class="editable-cell" data-field="ga_estimate" data-id="{{ f.id }}"
+                      data-placeholder="e.g. Q3 2026">{{ f.ga_estimate or '' }}</span></td>
             <td>
               <span class="editable-cell confidence-dot confidence-{{ f.confidence_level | lower }}"
                     data-field="confidence_level" data-id="{{ f.id }}" data-type="select"
@@ -133,8 +134,13 @@
                 {{ f.business_readiness or '—' }}
               </span>
             </td>
-            <td><span class="editable-cell" data-field="visible_in_tenant" data-id="{{ f.id }}">{{ f.visible_in_tenant or '' }}</span></td>
-            <td><span class="editable-cell" data-field="license_required" data-id="{{ f.id }}">{{ f.license_required or '' }}</span></td>
+            <td>
+              <span class="editable-cell" data-field="visible_in_tenant" data-id="{{ f.id }}"
+                    data-type="select" data-options='["Yes","No","Partial","Unknown"]'
+                    data-placeholder="Select…">{{ f.visible_in_tenant or '' }}</span>
+            </td>
+            <td><span class="editable-cell" data-field="license_required" data-id="{{ f.id }}"
+                      data-placeholder="e.g. M365 Copilot licence">{{ f.license_required or '' }}</span></td>
             <td>
               <button class="btn-note-toggle" onclick="FM.openNotes({{ f.id }}, event)" title="View/edit notes">
                 <i class="bi bi-chat-text{% if f.notes %}-fill text-primary{% endif %}"></i>

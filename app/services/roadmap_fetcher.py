@@ -6,40 +6,46 @@ from flask import current_app
 
 ATOM_NS = "http://www.w3.org/2005/Atom"
 
+# All workloads prefixed with "Copilot in" to make clear every feature is a Copilot capability.
+# Platform-level entries (Studio, Admin, Security) keep their own names.
 WORKLOAD_MAP = {
-    "copilot studio": "Copilot Studio",
-    "microsoft 365 copilot": "Microsoft 365 Copilot",
-    "microsoft teams": "Teams",
-    "outlook": "Outlook",
-    "word": "Word",
-    "excel": "Excel",
-    "powerpoint": "PowerPoint",
-    "onenote": "OneNote",
-    "sharepoint": "SharePoint",
-    "onedrive": "OneDrive",
-    "viva insights": "Viva Insights",
-    "viva engage": "Viva Engage",
-    "viva learning": "Viva Learning",
-    "viva goals": "Viva Goals",
-    "viva connections": "Viva Connections",
-    "viva": "Viva",
-    "purview": "Purview",
-    "power platform": "Power Platform",
-    "power automate": "Power Automate",
-    "power apps": "Power Apps",
-    "microsoft 365 admin": "M365 Admin",
-    "microsoft 365 apps": "M365 Apps",
-    "loop": "Loop",
-    "whiteboard": "Whiteboard",
-    "planner": "Planner",
-    "project": "Project",
-    "forms": "Forms",
-    "stream": "Stream",
-    "yammer": "Yammer",
-    "microsoft search": "Microsoft Search",
-    "microsoft graph": "Microsoft Graph",
-    "microsoft entra": "Entra",
-    "teams": "Teams",
+    # Platform / standalone — keep as-is
+    "copilot studio":           "Copilot Studio",
+    "microsoft 365 copilot":    "Microsoft 365 Copilot",
+    "copilot extensibility":    "Copilot Extensibility",
+    "microsoft 365 admin":      "Copilot Admin & Governance",
+    "microsoft purview":        "Copilot Security & Compliance",
+    "purview":                  "Copilot Security & Compliance",
+    "microsoft graph":          "Copilot Platform (Graph)",
+    # Host-app integrations — "Copilot in X"
+    "microsoft teams":          "Copilot in Teams",
+    "teams":                    "Copilot in Teams",
+    "outlook":                  "Copilot in Outlook",
+    "word":                     "Copilot in Word",
+    "excel":                    "Copilot in Excel",
+    "powerpoint":               "Copilot in PowerPoint",
+    "onenote":                  "Copilot in OneNote",
+    "sharepoint":               "Copilot in SharePoint",
+    "onedrive":                 "Copilot in OneDrive",
+    "loop":                     "Copilot in Loop",
+    "whiteboard":               "Copilot in Whiteboard",
+    "planner":                  "Copilot in Planner",
+    "forms":                    "Copilot in Forms",
+    "stream":                   "Copilot in Stream",
+    "viva insights":            "Copilot in Viva Insights",
+    "viva engage":              "Copilot in Viva Engage",
+    "viva learning":            "Copilot in Viva Learning",
+    "viva goals":               "Copilot in Viva Goals",
+    "viva connections":         "Copilot in Viva Connections",
+    "viva":                     "Copilot in Viva",
+    "power automate":           "Copilot in Power Automate",
+    "power apps":               "Copilot in Power Apps",
+    "power platform":           "Copilot in Power Platform",
+    "project":                  "Copilot in Project",
+    "yammer":                   "Copilot in Yammer",
+    "microsoft search":         "Copilot in Microsoft Search",
+    "microsoft entra":          "Copilot in Entra",
+    "microsoft 365 apps":       "Copilot in M365 Apps",
 }
 
 PLATFORM_KEYWORDS = {
@@ -89,12 +95,14 @@ def _parse_rss(xml_bytes):
 
 
 def _is_copilot(f):
+    """
+    Only include features that Microsoft has explicitly tagged as a Copilot feature.
+    Relying solely on category tags avoids picking up general M365 features that
+    happen to mention 'Copilot' in their description.
+    """
     cats = [c.lower() for c in f.get("_categories", [])]
-    if any("copilot" in c for c in cats):
-        return True
-    if "copilot" in (f.get("name") or "").lower():
-        return True
-    return False
+    # Microsoft explicitly categorises Copilot features with one of these tags
+    return any("copilot" in c for c in cats)
 
 
 def _parse_item(item):
@@ -138,17 +146,19 @@ def _parse_item(item):
 
 
 def _extract_workload(title, categories):
+    # Title prefix (e.g. "Microsoft Teams: AI notes...") is the most reliable signal
     if ":" in title:
         product_part = title.split(":")[0].lower().strip()
         for key, val in WORKLOAD_MAP.items():
             if key in product_part:
                 return val
-        return title.split(":")[0].strip()
+    # Fall back to explicit category tags
     for cat in categories:
         cat_lower = cat.lower()
         for key, val in WORKLOAD_MAP.items():
             if key in cat_lower:
                 return val
+    # Everything in this app is a Copilot feature; unknown host = platform-level
     return "Microsoft 365 Copilot"
 
 
@@ -180,19 +190,66 @@ def _extract_platforms(categories):
 
 
 def _extract_ga_date(description):
+    """
+    Extract a GA/rollout date estimate from the feature description.
+    Microsoft uses several formats across roadmap entries; we try each in order
+    of specificity (most precise first).
+    """
     MONTHS = [
         "january", "february", "march", "april", "may", "june",
         "july", "august", "september", "october", "november", "december",
     ]
+    MONTH_ABBR = [
+        "jan", "feb", "mar", "apr", "may", "jun",
+        "jul", "aug", "sep", "oct", "nov", "dec",
+    ]
+    YEAR = r"(202[4-9]|203[0-9])"
     desc_lower = description.lower()
-    month_pat = r"\b(" + "|".join(MONTHS) + r")\s+(202[4-9]|203[0-9])\b"
-    matches = re.findall(month_pat, desc_lower)
-    if matches:
-        return f"{matches[0][0].capitalize()} {matches[0][1]}"
-    q_pat = r"\b[Qq]([1-4])\s*(?:CY)?\s*(202[4-9]|203[0-9])\b"
-    q_matches = re.findall(q_pat, description)
-    if q_matches:
-        return f"Q{q_matches[0][0]} {q_matches[0][1]}"
+
+    # "June 2026" / "Jun 2026"
+    month_pat = r"\b(" + "|".join(MONTHS + MONTH_ABBR) + r")\.?\s+" + YEAR + r"\b"
+    m = re.search(month_pat, desc_lower)
+    if m:
+        raw = m.group(1).rstrip(".")
+        # normalise abbreviations to full month name
+        if len(raw) == 3:
+            idx = MONTH_ABBR.index(raw)
+            raw = MONTHS[idx]
+        return f"{raw.capitalize()} {m.group(2)}"
+
+    # "Q2 2026" / "Q2 CY2026" / "Q2CY2026"
+    m = re.search(r"\bQ([1-4])\s*(?:CY\s*)?" + YEAR + r"\b", description, re.IGNORECASE)
+    if m:
+        return f"Q{m.group(1)} {m.group(2)}"
+
+    # "CY2026" / "CY 2026"
+    m = re.search(r"\bCY\s?" + YEAR + r"\b", description, re.IGNORECASE)
+    if m:
+        return f"CY {m.group(1)}"
+
+    # "H1 2026" / "H2 2026"
+    m = re.search(r"\bH([12])\s*" + YEAR + r"\b", description, re.IGNORECASE)
+    if m:
+        return f"H{m.group(1)} {m.group(2)}"
+
+    # "first half of 2026" / "second half of 2026"
+    m = re.search(r"\b(first|second)\s+half\s+(?:of\s+)?" + YEAR + r"\b", desc_lower)
+    if m:
+        half = "H1" if m.group(1) == "first" else "H2"
+        return f"{half} {m.group(2)}"
+
+    # "early 2026" / "mid 2026" / "late 2026"
+    m = re.search(r"\b(early|mid|late)\s+" + YEAR + r"\b", desc_lower)
+    if m:
+        label_map = {"early": "Early", "mid": "Mid", "late": "Late"}
+        return f"{label_map[m.group(1)]} {m.group(2)}"
+
+    # Bare year as last resort — only if year appears near rollout language
+    if re.search(r"\b(roll(?:ing)?\s*out|availa(?:ble|bility)|general availability|launch)\b", desc_lower):
+        m = re.search(YEAR, description)
+        if m:
+            return m.group(1)
+
     return None
 
 

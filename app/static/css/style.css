@@ -246,13 +246,36 @@ body {
 
 .editable-cell, .editable-custom {
   min-width: 40px;
+  min-height: 22px;
   border-radius: 3px;
   transition: background .12s;
   display: inline-block;
+  vertical-align: middle;
 }
 .editable-cell:hover, .editable-custom:hover {
   background: var(--ms-blue-light);
   outline: 1.5px dashed var(--ms-blue);
+}
+
+/* Empty cell — show placeholder hint from data-placeholder attribute */
+.editable-cell.cell-empty {
+  min-width: 80px;
+  border: 1px dashed var(--ms-border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.editable-cell.cell-empty::before {
+  content: attr(data-placeholder);
+  color: #A19F9D;
+  font-style: italic;
+  font-size: .72rem;
+  pointer-events: none;
+}
+/* Fallback for cells with no data-placeholder */
+.editable-cell.cell-empty:not([data-placeholder])::before {
+  content: '—';
+  color: #C8C6C4;
+  font-style: normal;
 }
 
 .edit-input, .edit-select {

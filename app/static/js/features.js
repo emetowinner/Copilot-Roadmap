@@ -44,8 +44,14 @@ const FM = (() => {
     document.querySelectorAll('.editable-cell').forEach(cell => {
       cell.style.cursor = 'pointer';
       cell.title = 'Click to edit';
+      _markIfEmpty(cell);
       cell.addEventListener('click', e => _startEdit(e.currentTarget));
     });
+  }
+
+  function _markIfEmpty(cell) {
+    const isEmpty = !cell.textContent.replace(/✅|⚠️|❌/g, '').trim();
+    cell.classList.toggle('cell-empty', isEmpty);
   }
 
   function _startEdit(cell) {
@@ -80,7 +86,7 @@ const FM = (() => {
     cell.innerHTML = '';
     cell.appendChild(input);
     input.focus();
-    if (input.tagName === 'INPUT') input.select();
+    if (input instanceof HTMLInputElement) input.select();
 
     const save = () => {
       const newVal = input.value;
@@ -95,7 +101,7 @@ const FM = (() => {
     input.addEventListener('blur', save);
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { cell.innerHTML = originalHTML; _initCellClick(cell); }
+      if (e.key === 'Escape') { cell.innerHTML = originalHTML; _markIfEmpty(cell); _initCellClick(cell); }
     });
   }
 
@@ -128,7 +134,7 @@ const FM = (() => {
     cell.dataset.originalText = value;
     const statusIcons = { 'Safe to Promote': '✅ ', 'Pilot Only': '⚠️ ', 'Do Not Commit': '❌ ' };
     const prefix = statusIcons[value] || '';
-    const slg = value.toLowerCase().replace(/ /g, '-');
+    const slg = (value || '').toLowerCase().replace(/ /g, '-');
 
     cell.className = cell.className.replace(/status-\S+|phase-\S+|readiness-\S+|confidence-\S+/g, '');
 
@@ -143,6 +149,8 @@ const FM = (() => {
     }
 
     cell.textContent = prefix + value;
+    // Keep empty-state indicator in sync
+    _markIfEmpty(cell);
   }
 
   function _showMiniToast(cell, msg) {
