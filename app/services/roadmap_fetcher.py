@@ -1,7 +1,7 @@
 import re
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import date, datetime
 from flask import current_app
 
 ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -120,7 +120,7 @@ def _parse_item(item):
     workload = _extract_workload(title, categories)
     release_status = _extract_status(categories)
     release_phase = _extract_phase(categories)
-    ga_estimate = _extract_ga_date(description)
+    ga_estimate = _extract_ga_date(description, release_status)
     platforms = _extract_platforms(categories)
     confidence = _derive_confidence(release_status, release_phase)
     business_readiness = _derive_readiness(release_status, release_phase)
@@ -189,68 +189,147 @@ def _extract_platforms(categories):
     return result
 
 
-def _extract_ga_date(description):
+def _extract_ga_date(description, release_status=""):
     """
-    Extract a GA/rollout date estimate from the feature description.
-    Microsoft uses several formats across roadmap entries; we try each in order
-    of specificity (most precise first).
+    Extract a future-facing GA estimate from the feature description.
+
+    Two-pass strategy:
+      Pass 1 — search for a date that appears directly after GA-specific language
+               ("general availability", "rolling out", "available to all" etc.).
+               This avoids picking up preview or targeted-release dates that often
+               appear earlier in the same description.
+      Pass 2 — fall back to the first recognisable date anywhere in the text.
+
+    After extraction: if the feature is still In Development and the extracted
+    date is in the past, return None — a stale estimate is worse than no estimate.
     """
-    MONTHS = [
-        "january", "february", "march", "april", "may", "june",
-        "july", "august", "september", "october", "november", "december",
-    ]
-    MONTH_ABBR = [
-        "jan", "feb", "mar", "apr", "may", "jun",
-        "jul", "aug", "sep", "oct", "nov", "dec",
-    ]
-    YEAR = r"(202[4-9]|203[0-9])"
-    desc_lower = description.lower()
+    # Pass 1: date right after GA-context keyword
+    GA_CONTEXT = (
+        r"(?:general\s+availability|rolling\s+out(?:\s+to\s+(?:GA|general))?|"
+        r"available\s+(?:to\s+all|worldwide|generally)|"
+        r"GA\s*(?:date\s*)?(?:[:\-–]|\s+in\s+|\s+by\s+)|"
+        r"launch(?:es|ing|ed)?(?:\s+in)?)\s*(?:[:\-–])?\s*"
+    )
+    result = _search_date(GA_CONTEXT + _DATE_FRAGMENT(), description) or \
+             _search_date(_DATE_FRAGMENT(), description)
 
-    # "June 2026" / "Jun 2026"
-    month_pat = r"\b(" + "|".join(MONTHS + MONTH_ABBR) + r")\.?\s+" + YEAR + r"\b"
-    m = re.search(month_pat, desc_lower)
-    if m:
-        raw = m.group(1).rstrip(".")
-        # normalise abbreviations to full month name
-        if len(raw) == 3:
-            idx = MONTH_ABBR.index(raw)
-            raw = MONTHS[idx]
-        return f"{raw.capitalize()} {m.group(2)}"
+    if result and release_status == "In Development":
+        approx = _approximate_date(result)
+        if approx and approx < date.today():
+            # Stale — Microsoft's description hasn't been updated after a slip
+            return None
 
-    # "Q2 2026" / "Q2 CY2026" / "Q2CY2026"
-    m = re.search(r"\bQ([1-4])\s*(?:CY\s*)?" + YEAR + r"\b", description, re.IGNORECASE)
-    if m:
-        return f"Q{m.group(1)} {m.group(2)}"
+    return result
 
-    # "CY2026" / "CY 2026"
-    m = re.search(r"\bCY\s?" + YEAR + r"\b", description, re.IGNORECASE)
-    if m:
-        return f"CY {m.group(1)}"
 
-    # "H1 2026" / "H2 2026"
-    m = re.search(r"\bH([12])\s*" + YEAR + r"\b", description, re.IGNORECASE)
-    if m:
-        return f"H{m.group(1)} {m.group(2)}"
+def _DATE_FRAGMENT():
+    MONTHS = (
+        "january|february|march|april|may|june|"
+        "july|august|september|october|november|december|"
+        "jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec"
+    )
+    YEAR = r"202[4-9]|203[0-9]"
+    return (
+        r"(?:"
+        r"(?:" + MONTHS + r")\.?\s+(?:" + YEAR + r")"    # June 2026 / Jun 2026
+        r"|Q[1-4]\s*(?:CY\s*)?(?:" + YEAR + r")"        # Q2 2026 / Q2 CY2026
+        r"|CY\s*(?:" + YEAR + r")"                       # CY2026
+        r"|H[12]\s*(?:" + YEAR + r")"                    # H1 2026
+        r"|(?:first|second)\s+half\s+(?:of\s+)?(?:" + YEAR + r")"  # first half of 2026
+        r"|(?:early|mid|late)\s+(?:" + YEAR + r")"      # early 2026
+        r")"
+    )
 
-    # "first half of 2026" / "second half of 2026"
-    m = re.search(r"\b(first|second)\s+half\s+(?:of\s+)?" + YEAR + r"\b", desc_lower)
-    if m:
-        half = "H1" if m.group(1) == "first" else "H2"
-        return f"{half} {m.group(2)}"
 
-    # "early 2026" / "mid 2026" / "late 2026"
-    m = re.search(r"\b(early|mid|late)\s+" + YEAR + r"\b", desc_lower)
-    if m:
-        label_map = {"early": "Early", "mid": "Mid", "late": "Late"}
-        return f"{label_map[m.group(1)]} {m.group(2)}"
+def _search_date(pattern, text):
+    """Run pattern against text and normalise the matched date string."""
+    m = re.search(pattern, text, re.IGNORECASE)
+    if not m:
+        return None
+    raw = m.group(0).strip()
 
-    # Bare year as last resort — only if year appears near rollout language
-    if re.search(r"\b(roll(?:ing)?\s*out|availa(?:ble|bility)|general availability|launch)\b", desc_lower):
-        m = re.search(YEAR, description)
-        if m:
-            return m.group(1)
+    MONTHS_FULL = ["january","february","march","april","may","june",
+                   "july","august","september","october","november","december"]
+    MONTHS_ABBR = ["jan","feb","mar","apr","may","jun",
+                   "jul","aug","sep","oct","nov","dec"]
+    YEAR_PAT = r"(202[4-9]|203[0-9])"
+    raw_lower = raw.lower()
+
+    # Month YYYY
+    mp = r"\b(" + "|".join(MONTHS_FULL + MONTHS_ABBR) + r")\.?\s+" + YEAR_PAT
+    mm = re.search(mp, raw_lower)
+    if mm:
+        name = mm.group(1).rstrip(".")
+        if len(name) == 3 and name in MONTHS_ABBR:
+            name = MONTHS_FULL[MONTHS_ABBR.index(name)]
+        return f"{name.capitalize()} {mm.group(2)}"
+
+    mm = re.search(r"\bQ([1-4])\s*(?:CY\s*)?" + YEAR_PAT, raw, re.IGNORECASE)
+    if mm:
+        return f"Q{mm.group(1)} {mm.group(2)}"
+
+    mm = re.search(r"\bCY\s?" + YEAR_PAT, raw, re.IGNORECASE)
+    if mm:
+        return f"CY {mm.group(1)}"
+
+    mm = re.search(r"\bH([12])\s*" + YEAR_PAT, raw, re.IGNORECASE)
+    if mm:
+        return f"H{mm.group(1)} {mm.group(2)}"
+
+    mm = re.search(r"\b(first|second)\s+half\s+(?:of\s+)?" + YEAR_PAT, raw_lower)
+    if mm:
+        return f"{'H1' if mm.group(1) == 'first' else 'H2'} {mm.group(2)}"
+
+    mm = re.search(r"\b(early|mid|late)\s+" + YEAR_PAT, raw_lower)
+    if mm:
+        return f"{mm.group(1).capitalize()} {mm.group(2)}"
 
     return None
+
+
+def _approximate_date(estimate):
+    """
+    Convert a ga_estimate string to an approximate END date of the period.
+    We use the end (not start) so that "H1 2026" isn't considered past
+    until July 2026, not March 2026.
+    """
+    if not estimate:
+        return None
+    import calendar
+    MONTHS_FULL = ["january","february","march","april","may","june",
+                   "july","august","september","october","november","december"]
+    est_lower = estimate.lower()
+    year_m = re.search(r"(202\d|203\d)", estimate)
+    if not year_m:
+        return None
+    year = int(year_m.group(1))
+
+    # Quarter → last month of that quarter
+    q_m = re.search(r"Q([1-4])", estimate, re.IGNORECASE)
+    if q_m:
+        end_month = int(q_m.group(1)) * 3          # Q1→3, Q2→6, Q3→9, Q4→12
+        last_day = calendar.monthrange(year, end_month)[1]
+        return date(year, end_month, last_day)
+
+    # Half-year → last day of H1 (June 30) or H2 (Dec 31)
+    h_m = re.search(r"H([12])", estimate, re.IGNORECASE)
+    if h_m:
+        end_month = 6 if h_m.group(1) == "1" else 12
+        last_day = calendar.monthrange(year, end_month)[1]
+        return date(year, end_month, last_day)
+
+    # Named month → last day of that month
+    for i, name in enumerate(MONTHS_FULL, start=1):
+        if name in est_lower:
+            return date(year, i, calendar.monthrange(year, i)[1])
+
+    # CY / Early / Mid / Late / bare year → end of year
+    if "early" in est_lower:
+        return date(year, 4, 30)   # end of April is safe for "early"
+    if "mid" in est_lower:
+        return date(year, 8, 31)
+    # late, CY, bare year — end of year
+    return date(year, 12, 31)
 
 
 def _derive_confidence(release_status, release_phase):
