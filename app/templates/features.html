@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% block title %}Feature Matrix — Copilot Roadmap Tracker{% endblock %}
+
+{% block content %}
+<!-- Page header -->
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+  <div>
+    <h1 class="page-title mb-0">Feature Matrix</h1>
+    <p class="text-muted small mt-1 mb-0">Full Copilot feature tracking with custom columns, notes, and inline editing.</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button class="btn ms-btn-secondary" onclick="FM.openAddColumn()">
+      <i class="bi bi-plus-square me-1"></i>Add Column
+    </button>
+    <button class="btn ms-btn-secondary" onclick="FM.openAddFeature()">
+      <i class="bi bi-plus-circle me-1"></i>Add Feature
+    </button>
+    <button class="btn ms-btn-primary" id="refreshBtnMatrix" onclick="CRD.triggerRefresh()">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+    <button class="btn btn-outline-secondary" onclick="FM.exportFiltered()">
+      <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+    </button>
+  </div>
+</div>
+
+<!-- Feature table card -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white border-bottom py-3">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <span class="text-muted small" id="fmFilterCount"></span>
+      <button class="btn btn-sm btn-link text-secondary p-0" id="fmClearFiltersBtn" onclick="FM.clearFilters()" style="display:none;">
+        <i class="bi bi-x-circle me-1"></i>Clear filters
+      </button>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <select id="fmFilterWorkload" multiple placeholder="Workload…">
+        {% for w in filter_options.workloads %}<option value="{{ w }}">{{ w }}</option>{% endfor %}
+      </select>
+      <select id="fmFilterStatus" multiple placeholder="Status…">
+        {% for s in filter_options.statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+      <select id="fmFilterPhase" multiple placeholder="Phase…">
+        {% for p in filter_options.phases %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+      </select>
+      <select id="fmFilterGaEstimate" multiple placeholder="GA Estimate…">
+        {% for g in filter_options.ga_estimates %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+      </select>
+      <select id="fmFilterReadiness" multiple placeholder="Readiness…">
+        {% for r in filter_options.readiness %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select>
+      <select id="fmFilterSource" multiple placeholder="Source…">
+        <option value="roadmap">MS Roadmap</option>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table id="featureTable" class="table table-hover table-sm align-middle mb-0">
+        <thead class="table-header-light">
+          <tr>
+            <th style="width:30px;"><input type="checkbox" id="selectAllRows" title="Select all"></th>
+            <th>Feature Name</th>
+            <th>Workload</th>
+            <th>Status</th>
+            <th>Phase</th>
+            <th>GA Estimate</th>
+            <th>Confidence</th>
+            <th>Readiness</th>
+            <th>Visible in Tenant</th>
+            <th>License Required</th>
+            <th>Notes</th>
+            {% for col in custom_columns %}
+            <th class="custom-col-header" data-col-id="{{ col.id }}">
+              {{ col.name }}
+              <button class="btn-col-del ms-1" title="Delete column" onclick="FM.deleteColumn({{ col.id }}, '{{ col.name }}', event)">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </th>
+            {% endfor %}
+            <th style="width:70px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="featureTableBody">
+          {% for f in features %}
+          <tr class="feature-row" id="row-{{ f.id }}"
+              data-id="{{ f.id }}"
+              data-workload="{{ f.workload or '' }}"
+              data-status="{{ f.release_status or '' }}"
+              data-phase="{{ f.release_phase or '' }}"
+              data-ga="{{ f.ga_estimate or '' }}"
+              data-readiness="{{ f.business_readiness or '' }}"
+              data-source="{{ 'custom' if f.is_custom else 'roadmap' }}">
+            <td><input type="checkbox" class="row-select" value="{{ f.id }}"></td>
+            <td>
+              <div class="d-flex align-items-start gap-1">
+                <span class="editable-cell fw-medium" data-field="name" data-id="{{ f.id }}">{{ f.name }}</span>
+                {% if f.is_custom %}<span class="badge bg-secondary" style="font-size:.6rem;white-space:nowrap;">Custom</span>{% endif %}
+                {% if f.roadmap_link %}
+                <a href="{{ f.roadmap_link }}" target="_blank" rel="noopener" class="ms-1 text-muted" title="View on Microsoft Roadmap"><i class="bi bi-box-arrow-up-right small"></i></a>
+                {% endif %}
+              </div>
+            </td>
+            <td><span class="editable-cell workload-tag" data-field="workload" data-id="{{ f.id }}">{{ f.workload or '' }}</span></td>
+            <td>
+              <span class="editable-cell status-badge status-{{ f.release_status | lower | replace(' ', '-') }}"
+                    data-field="release_status" data-id="{{ f.id }}" data-type="select"
+                    data-options='["GA","Rolling Out","In Development"]'>
+                {{ f.release_status or '—' }}
+              </span>
+            </td>
+            <td>
+              <span class="editable-cell phase-badge phase-{{ f.release_phase | lower | replace(' ', '-') }}"
+                    data-field="release_phase" data-id="{{ f.id }}" data-type="select"
+                    data-options='["General Availability","Targeted Release","Preview","Frontier"]'>
+                {{ f.release_phase or '—' }}
+              </span>
+            </td>
+            <td><span class="editable-cell" data-field="ga_estimate" data-id="{{ f.id }}">{{ f.ga_estimate or '' }}</span></td>
+            <td>
+              <span class="editable-cell confidence-dot confidence-{{ f.confidence_level | lower }}"
+                    data-field="confidence_level" data-id="{{ f.id }}" data-type="select"
+                    data-options='["High","Medium","Low"]'>
+                {{ f.confidence_level or '—' }}
+              </span>
+            </td>
+            <td>
+              <span class="editable-cell readiness-badge readiness-{{ f.business_readiness | lower | replace(' ', '-') }}"
+                    data-field="business_readiness" data-id="{{ f.id }}" data-type="select"
+                    data-options='["Safe to Promote","Pilot Only","Do Not Commit"]'>
+                {% if f.business_readiness == 'Safe to Promote' %}✅{% elif f.business_readiness == 'Pilot Only' %}⚠️{% elif f.business_readiness == 'Do Not Commit' %}❌{% endif %}
+                {{ f.business_readiness or '—' }}
+              </span>
+            </td>
+            <td><span class="editable-cell" data-field="visible_in_tenant" data-id="{{ f.id }}">{{ f.visible_in_tenant or '' }}</span></td>
+            <td><span class="editable-cell" data-field="license_required" data-id="{{ f.id }}">{{ f.license_required or '' }}</span></td>
+            <td>
+              <button class="btn-note-toggle" onclick="FM.openNotes({{ f.id }}, event)" title="View/edit notes">
+                <i class="bi bi-chat-text{% if f.notes %}-fill text-primary{% endif %}"></i>
+                {% if f.notes %}<span class="note-count">{{ f.notes | length }}</span>{% endif %}
+              </button>
+            </td>
+            {% for col in custom_columns %}
+            <td>
+              {% set cv = f.custom_values | selectattr('column_id', 'equalto', col.id) | first %}
+              <span class="editable-custom" data-feature-id="{{ f.id }}" data-col-id="{{ col.id }}" data-col-type="{{ col.column_type }}"
+                    {% if col.column_type == 'dropdown' %}data-options="{{ col.options }}"{% endif %}>
+                {{ cv.value if cv else '' }}
+              </span>
+            </td>
+            {% endfor %}
+            <td>
+              <button class="btn btn-sm btn-outline-danger" onclick="FM.deleteFeature({{ f.id }}, event)" title="Delete feature">
+                <i class="bi bi-trash3"></i>
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- Add Feature Modal -->
+<div class="modal fade" id="addFeatureModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header ms-modal-header">
+        <h5 class="modal-title fw-semibold"><i class="bi bi-plus-circle me-2"></i>Add Custom Feature</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label fw-medium">Feature Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="newFeatureName" placeholder="e.g. Copilot in Planner">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-medium">Workload</label>
+            <input type="text" class="form-control" id="newFeatureWorkload" placeholder="e.g. Planner, Teams, Word">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-medium">GA Estimate</label>
+            <input type="text" class="form-control" id="newFeatureGA" placeholder="e.g. Q3 2026, June 2026">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-medium">Release Status</label>
+            <select class="form-select" id="newFeatureStatus">
+              <option>In Development</option>
+              <option>Rolling Out</option>
+              <option>GA</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-medium">Release Phase</label>
+            <select class="form-select" id="newFeaturePhase">
+              <option>Preview</option>
+              <option>Targeted Release</option>
+              <option>General Availability</option>
+              <option>Frontier</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-medium">Business Readiness</label>
+            <select class="form-select" id="newFeatureReadiness">
+              <option>Pilot Only</option>
+              <option>Safe to Promote</option>
+              <option>Do Not Commit</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-medium">Confidence Level</label>
+            <select class="form-select" id="newFeatureConfidence">
+              <option>Low</option>
+              <option>Medium</option>
+              <option>High</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-medium">Visible in Tenant?</label>
+            <select class="form-select" id="newFeatureVisible">
+              <option value="">Unknown</option>
+              <option>Yes</option>
+              <option>No</option>
+              <option>Partial</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-medium">License Required</label>
+            <input type="text" class="form-control" id="newFeatureLicense" placeholder="e.g. Microsoft 365 Copilot licence">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-medium">Description</label>
+            <textarea class="form-control" id="newFeatureDesc" rows="2"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn ms-btn-primary" onclick="FM.saveNewFeature()">
+          <i class="bi bi-plus-circle me-1"></i>Add Feature
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Add Column Modal -->
+<div class="modal fade" id="addColumnModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header ms-modal-header">
+        <h5 class="modal-title fw-semibold"><i class="bi bi-plus-square me-2"></i>Add Custom Column</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-medium">Column Name <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" id="newColName" placeholder="e.g. Owner, Pilot Date, Priority">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-medium">Column Type</label>
+          <select class="form-select" id="newColType" onchange="FM.toggleColOptions()">
+            <option value="text">Free Text</option>
+            <option value="date">Date</option>
+            <option value="dropdown">Dropdown</option>
+            <option value="checkbox">Checkbox (Yes/No)</option>
+          </select>
+        </div>
+        <div id="dropdownOptionsGroup" class="d-none">
+          <label class="form-label fw-medium">Dropdown Options <small class="text-muted">(one per line)</small></label>
+          <textarea class="form-control" id="newColOptions" rows="4" placeholder="Option 1&#10;Option 2&#10;Option 3"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn ms-btn-primary" onclick="FM.saveNewColumn()">
+          <i class="bi bi-plus-square me-1"></i>Add Column
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Notes Modal -->
+<div class="modal fade" id="notesModal" tabindex="-1">
+  <div class="modal-dialog modal-md">
+    <div class="modal-content">
+      <div class="modal-header ms-modal-header">
+        <h5 class="modal-title fw-semibold"><i class="bi bi-chat-text me-2"></i>Notes</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="notesList" class="mb-3"></div>
+        <div class="input-group">
+          <textarea class="form-control" id="newNoteText" rows="2" placeholder="Add a note…"></textarea>
+          <button class="btn ms-btn-primary" onclick="FM.addNote()">
+            <i class="bi bi-plus-lg"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Pass column data to JS
+  const CUSTOM_COLUMNS = {{ custom_columns_data | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/features.js') }}"></script>
+{% endblock %}

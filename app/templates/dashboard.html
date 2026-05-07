@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Copilot Roadmap Tracker{% endblock %}
+
+{% block content %}
+<!-- Page header -->
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+  <div>
+    <h1 class="page-title mb-0">Copilot Feature Readiness Dashboard</h1>
+    <p class="text-muted small mt-1 mb-0">
+      {% if last_sync %}
+        Last synced: <strong>{{ last_sync.completed_at.strftime('%d %b %Y %H:%M') }}</strong>
+        &nbsp;·&nbsp; {{ last_sync.items_fetched }} features fetched
+      {% else %}
+        No sync yet — click <strong>Refresh from Roadmap</strong> to load data.
+      {% endif %}
+    </p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button class="btn ms-btn-primary" id="refreshBtn" onclick="CRD.triggerRefresh()">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh from Roadmap
+    </button>
+    <button class="btn btn-outline-secondary" onclick="exportFiltered()">
+      <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+    </button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('features.index') }}">
+      <i class="bi bi-table me-1"></i>Feature Matrix
+    </a>
+  </div>
+</div>
+
+{% if stats.total == 0 %}
+<!-- Empty state -->
+<div class="empty-state text-center py-5">
+  <i class="bi bi-stars empty-icon"></i>
+  <h4 class="mt-3 fw-semibold">No features loaded yet</h4>
+  <p class="text-muted">Click <strong>Refresh from Roadmap</strong> to pull Copilot features from Microsoft's live M365 roadmap.</p>
+  <button class="btn ms-btn-primary mt-2" onclick="CRD.triggerRefresh()">
+    <i class="bi bi-arrow-clockwise me-2"></i>Refresh from Roadmap
+  </button>
+</div>
+{% else %}
+
+<!-- Summary cards -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="stat-card stat-card-primary">
+      <div class="stat-value">{{ stats.total }}</div>
+      <div class="stat-label">Total Features</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="stat-card stat-card-success">
+      <div class="stat-value">{{ stats.ga }}</div>
+      <div class="stat-label"><i class="bi bi-check-circle me-1"></i>Generally Available</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="stat-card stat-card-info">
+      <div class="stat-value">{{ stats.rolling_out }}</div>
+      <div class="stat-label"><i class="bi bi-arrow-right-circle me-1"></i>Rolling Out</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="stat-card stat-card-warning">
+      <div class="stat-value">{{ stats.in_dev }}</div>
+      <div class="stat-label"><i class="bi bi-tools me-1"></i>In Development</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="stat-card stat-card-danger">
+      <div class="stat-value">{{ stats.frontier }}</div>
+      <div class="stat-label"><i class="bi bi-rocket me-1"></i>Frontier</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="stat-card stat-card-neutral">
+      <div class="stat-value">{{ stats.custom }}</div>
+      <div class="stat-label"><i class="bi bi-person-plus me-1"></i>Custom Added</div>
+    </div>
+  </div>
+</div>
+
+<!-- Business readiness cards -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-md-4">
+    <div class="readiness-card readiness-safe">
+      <div class="readiness-icon"><i class="bi bi-shield-check"></i></div>
+      <div>
+        <div class="readiness-value">{{ stats.safe }}</div>
+        <div class="readiness-label">Safe to Promote</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-4">
+    <div class="readiness-card readiness-pilot">
+      <div class="readiness-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <div>
+        <div class="readiness-value">{{ stats.pilot }}</div>
+        <div class="readiness-label">Pilot Only</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-4">
+    <div class="readiness-card readiness-donot">
+      <div class="readiness-icon"><i class="bi bi-x-circle"></i></div>
+      <div>
+        <div class="readiness-value">{{ stats.do_not }}</div>
+        <div class="readiness-label">Do Not Commit</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts row -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="chart-card">
+      <div class="chart-card-title">Release Status</div>
+      <div class="chart-container-sm">
+        <canvas id="chartStatus"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="chart-card">
+      <div class="chart-card-title">Release Phase</div>
+      <div class="chart-container-sm">
+        <canvas id="chartPhase"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="chart-card">
+      <div class="chart-card-title">Business Readiness</div>
+      <div class="chart-container-sm">
+        <canvas id="chartReadiness"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="chart-card">
+      <div class="chart-card-title">Confidence Level</div>
+      <div class="chart-container-sm">
+        <canvas id="chartConfidence"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- GA Timeline + Workload charts -->
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-7">
+    <div class="chart-card">
+      <div class="chart-card-title">Upcoming GA Timeline (In Development / Rolling Out features)</div>
+      <div class="chart-container-md">
+        <canvas id="chartGaTimeline"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-lg-5">
+    <div class="chart-card">
+      <div class="chart-card-title">Features by Workload</div>
+      <div class="chart-container-md">
+        <canvas id="chartWorkload"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Feature table -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white border-bottom py-3">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <h6 class="fw-semibold mb-0"><i class="bi bi-table me-2 text-primary"></i>Feature Overview</h6>
+      <button class="btn btn-sm btn-link text-secondary p-0" id="clearFiltersBtn" onclick="clearDashFilters()" style="display:none;">
+        <i class="bi bi-x-circle me-1"></i>Clear filters
+      </button>
+    </div>
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <select id="filterWorkload" multiple placeholder="Workload…">
+        {% for w in filter_options.workloads %}<option value="{{ w }}">{{ w }}</option>{% endfor %}
+      </select>
+      <select id="filterStatus" multiple placeholder="Status…">
+        {% for s in filter_options.statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+      <select id="filterPhase" multiple placeholder="Phase…">
+        {% for p in filter_options.phases %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+      </select>
+      <select id="filterGaEstimate" multiple placeholder="GA Estimate…">
+        {% for g in filter_options.ga_estimates %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+      </select>
+      <select id="filterReadiness" multiple placeholder="Readiness…">
+        {% for r in filter_options.readiness %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table id="dashboardTable" class="table table-hover table-sm mb-0 align-middle">
+        <thead class="table-header-light">
+          <tr>
+            <th>Feature Name</th>
+            <th>Workload</th>
+            <th>Status</th>
+            <th>Phase</th>
+            <th>GA Estimate</th>
+            <th>Confidence</th>
+            <th>Readiness</th>
+            <th>Visible</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in features %}
+          <tr class="feature-row"
+              data-workload="{{ f.workload or '' }}"
+              data-status="{{ f.release_status or '' }}"
+              data-phase="{{ f.release_phase or '' }}"
+              data-ga="{{ f.ga_estimate or '' }}"
+              data-readiness="{{ f.business_readiness or '' }}">
+            <td class="fw-medium">
+              {% if f.roadmap_link %}
+              <a href="{{ f.roadmap_link }}" target="_blank" rel="noopener" class="text-decoration-none text-dark feature-name-link">
+                {{ f.name | truncate(80) }}<i class="bi bi-box-arrow-up-right ms-1 small text-muted"></i>
+              </a>
+              {% else %}
+              {{ f.name | truncate(80) }}
+              {% endif %}
+              {% if f.is_custom %}<span class="badge bg-secondary ms-1" style="font-size:.65rem;">Custom</span>{% endif %}
+            </td>
+            <td><span class="workload-tag">{{ f.workload or '—' }}</span></td>
+            <td>
+              <span class="status-badge status-{{ f.release_status | lower | replace(' ', '-') }}">
+                {{ f.release_status or '—' }}
+              </span>
+            </td>
+            <td>
+              <span class="phase-badge phase-{{ f.release_phase | lower | replace(' ', '-') }}">
+                {{ f.release_phase or '—' }}
+              </span>
+            </td>
+            <td class="text-nowrap">{{ f.ga_estimate or '—' }}</td>
+            <td>
+              <span class="confidence-dot confidence-{{ f.confidence_level | lower }}"></span>
+              {{ f.confidence_level or '—' }}
+            </td>
+            <td>
+              <span class="readiness-badge readiness-{{ f.business_readiness | lower | replace(' ', '-') }}">
+                {% if f.business_readiness == 'Safe to Promote' %}✅{% elif f.business_readiness == 'Pilot Only' %}⚠️{% elif f.business_readiness == 'Do Not Commit' %}❌{% endif %}
+                {{ f.business_readiness or '—' }}
+              </span>
+            </td>
+            <td>{{ f.visible_in_tenant or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script>
+  // Pass server-side chart data to JS
+  const CHART_DATA = {{ {
+    'status': workload_counts,
+    'ga_timeline': ga_timeline
+  } | tojson }};
+</script>
+{% endblock %}
